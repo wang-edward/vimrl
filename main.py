@@ -1,6 +1,9 @@
 import pynvim
 import string
 import torch
+import torch.nn as nn
+import torch.distributions as dist
+import torch.optim as optim
 from typing import List
 
 ACTIONS = [
@@ -68,21 +71,79 @@ def step(action: str):
     # For example, negative step penalty and check if we've reached some goal.
     reward, done = compute_reward(updated_text)
 
-    # 4. Return (next_state, reward, done)
-    return (updated_text, cursor_pos, mode), reward, done
+    # 4. Return (reward, done)
+    return reward, done
 
 
-def compute_reward(current_text):
+def compute_reward(current_text: List[str]):
     # TODO use diff instead and assign a % score
-    if current_text == ["Hello, world!"]:
+    if current_text == ["hjk"]: # TODO make this work with arbitrary goal
         return (100, True)
     else:
         return (-1, False)
 
+class PolicyNet(nn.Module):
+    def __init__(self, state_dim, action_dim, hidden_size=64):
+        super(PolicyNet, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, action_dim)
+
+    def forward(self, x):
+        """
+        TODO what does this mean
+        - state_dim = MAX_LEN + 1 (cursor) + 1 (mode) = 40 + 1 + 1 = 42
+        - action_dim = len(ACTIONS) = 6
+        x shape: (batch_size, state_dim)
+        returns: (batch_size, action_dim)  # raw logits
+        """
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+state_dim = MAX_LEN + 1 + 1
+action_dim = len(ACTIONS)
+policy_net = PolicyNet(state_dim, action_dim)
+
+# This chooses a random action?
+def agent_policy():
+    state_tensor = state_to_tensor().unsqueeze(0)
+    logits = policy_net(state_tensor)
+    action_dist = dist.Categorical(logits=logits)
+    action_idx = int(action_dist.sample().item()) # take a sample
+    return ACTIONS[action_idx]
 
 torch.set_printoptions(precision=10)
 print(state_to_tensor())
 
+optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
+gamma = 0.99
+
+def run_episode(env, max_steps=50):
+    """
+    Runs one episode in the environment.
+    Collect (state, action, reward) pairs until done or max_steps.
+    Return the trajectory.
+    """
+    log_probs = []
+    rewards = []
+    state = env.reset()
+    done = False
+    for t in range(max_steps):
+        state_tensor = state_to_tensor().unsqueeze(0)
+        logits = policy_net(state_tensor)
+        action_dist = dist.Categorical(logits=logits)
+
+        action_idx = action_dist.sample()
+        action = ACTIONS[int(action_idx.item())]
+        log_prob = action_dist.log_prob(action_idx)
+        reward, done = env.step(action)
+
+        log_probs.append(log_prob)
+        rewards.append(reward)
+
+        if done:
+            break
+    return log_probs, rewards
 
 # # RL loop, simplified
 # for episode in range(100):

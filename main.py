@@ -77,10 +77,11 @@ def step(action: str):
 
 def compute_reward(current_text: List[str]):
     # TODO use diff instead and assign a % score
-    if current_text == ["hjk"]: # TODO make this work with arbitrary goal
+    if current_text == ["hjk"]:  # TODO make this work with arbitrary goal
         return (100, True)
     else:
         return (-1, False)
+
 
 class PolicyNet(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_size=64):
@@ -100,17 +101,20 @@ class PolicyNet(nn.Module):
         x = self.fc2(x)
         return x
 
+
 state_dim = MAX_LEN + 1 + 1
 action_dim = len(ACTIONS)
 policy_net = PolicyNet(state_dim, action_dim)
 
-# This chooses a random action?
-def agent_policy():
-    state_tensor = state_to_tensor().unsqueeze(0)
-    logits = policy_net(state_tensor)
-    action_dist = dist.Categorical(logits=logits)
-    action_idx = int(action_dist.sample().item()) # take a sample
-    return ACTIONS[action_idx]
+
+# # This chooses a random action?
+# def agent_policy():
+#     state_tensor = state_to_tensor().unsqueeze(0)
+#     logits = policy_net(state_tensor)
+#     action_dist = dist.Categorical(logits=logits)
+#     action_idx = int(action_dist.sample().item())  # take a sample
+#     return ACTIONS[action_idx]
+
 
 torch.set_printoptions(precision=10)
 print(state_to_tensor())
@@ -144,6 +148,7 @@ def run_episode(max_steps=50):
             break
     return log_probs, rewards
 
+
 def compute_returns(rewards, gamma=0.99):
     ans = []
     R = 0
@@ -152,31 +157,35 @@ def compute_returns(rewards, gamma=0.99):
         ans.insert(0, R)
     return ans
 
+
 def main():
     for episode in range(1000):
         log_probs, rewards = run_episode()  # you'll need a real env
         returns = compute_returns(rewards, gamma)
-        
+
         # Convert returns to a torch tensor
         returns_tensor = torch.tensor(returns, dtype=torch.float32)
-        
+
         # Normalize returns (common trick for stable training)
-        returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_tensor.std() + 1e-8)
-        
+        returns_tensor = (returns_tensor - returns_tensor.mean()) / (
+            returns_tensor.std() + 1e-8
+        )
+
         # Calculate the policy loss
         policy_loss = []
         for log_prob, Gt in zip(log_probs, returns_tensor):
             policy_loss.append(-log_prob * Gt)
         policy_loss = torch.cat(policy_loss).sum()
-        
+
         # Update the network
         optimizer.zero_grad()
         policy_loss.backward()
         optimizer.step()
-        
+
         # Possibly print diagnostics
         if episode % 50 == 0:
             print(f"Episode {episode}, total reward: {sum(rewards)}")
+
 
 if __name__ == "__main__":
     main()

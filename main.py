@@ -118,7 +118,7 @@ print(state_to_tensor())
 optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
 gamma = 0.99
 
-def run_episode(env, max_steps=50):
+def run_episode(max_steps=50):
     """
     Runs one episode in the environment.
     Collect (state, action, reward) pairs until done or max_steps.
@@ -126,7 +126,6 @@ def run_episode(env, max_steps=50):
     """
     log_probs = []
     rewards = []
-    state = env.reset()
     done = False
     for t in range(max_steps):
         state_tensor = state_to_tensor().unsqueeze(0)
@@ -136,7 +135,7 @@ def run_episode(env, max_steps=50):
         action_idx = action_dist.sample()
         action = ACTIONS[int(action_idx.item())]
         log_prob = action_dist.log_prob(action_idx)
-        reward, done = env.step(action)
+        reward, done = step(action)
 
         log_probs.append(log_prob)
         rewards.append(reward)
@@ -144,6 +143,43 @@ def run_episode(env, max_steps=50):
         if done:
             break
     return log_probs, rewards
+
+def compute_returns(rewards, gamma=0.99):
+    ans = []
+    R = 0
+    for r in reversed(rewards):
+        R = r + gamma * R
+        ans.insert(0, R)
+    return ans
+
+def main():
+    for episode in range(1000):
+        log_probs, rewards = run_episode()  # you'll need a real env
+        returns = compute_returns(rewards, gamma)
+        
+        # Convert returns to a torch tensor
+        returns_tensor = torch.tensor(returns, dtype=torch.float32)
+        
+        # Normalize returns (common trick for stable training)
+        returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_tensor.std() + 1e-8)
+        
+        # Calculate the policy loss
+        policy_loss = []
+        for log_prob, Gt in zip(log_probs, returns_tensor):
+            policy_loss.append(-log_prob * Gt)
+        policy_loss = torch.cat(policy_loss).sum()
+        
+        # Update the network
+        optimizer.zero_grad()
+        policy_loss.backward()
+        optimizer.step()
+        
+        # Possibly print diagnostics
+        if episode % 50 == 0:
+            print(f"Episode {episode}, total reward: {sum(rewards)}")
+
+if __name__ == "__main__":
+    main()
 
 # # RL loop, simplified
 # for episode in range(100):

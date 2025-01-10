@@ -1,6 +1,7 @@
 import pynvim
+
 nvim = pynvim.attach(
-    'child',
+    "child",
     argv=[
         "nvim",
         "--embed",

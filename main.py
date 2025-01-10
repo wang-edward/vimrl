@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.distributions as dist
 import torch.optim as optim
 from typing import List
-from numpy import nan
 
 ACTIONS = [
     "x",
@@ -38,14 +37,14 @@ def encode_mode(mode: str) -> int:
         return 0
     elif mode == "i":
         return 1
-    assert(False)
+    assert False
 
 
 def state_to_tensor(nvim) -> torch.Tensor:
     text_line = nvim.current.buffer[0]  # TODO adapt for :
     line_ids = encode_text(text_line)
     col = nvim.funcs.getpos(".")[2]  # extract 3rd num
-    assert(col != None)
+    assert col != None
     cursor_encoded = [col / float(MAX_LEN)]  # [2] # extract 3nd int
     mode_id = [encode_mode(nvim.funcs.mode())]
     full_vec = line_ids + cursor_encoded + mode_id
@@ -81,7 +80,7 @@ def compute_reward(current_text: List[str], goal: str):
     ans = 0
     curr = "\n".join(current_text)
     dist = Levenshtein.distance(curr, goal)
-    if (dist == 0):
+    if dist == 0:
         return (100, True)
     else:
         return (-1 * dist, False)
@@ -104,6 +103,7 @@ class PolicyNet(nn.Module):
         x = torch.relu(self.fc1(x))
         x = self.fc2(x)
         return x
+
 
 def run_episode(nvim, goal, max_steps=50):
     """
@@ -153,12 +153,13 @@ gamma = 0.99
 
 torch.set_printoptions(precision=10)
 
+
 def main():
     start = "abcd"
     goal = "bcd"
 
     for episode in range(10):
-        nvim = pynvim.attach('child', argv=[ "nvim", "--embed", "--headless", "--clean"])
+        nvim = pynvim.attach("child", argv=["nvim", "--embed", "--headless", "--clean"])
         nvim.current.buffer[0] = start
         log_probs, rewards = run_episode(nvim, goal)
         returns = compute_returns(rewards, gamma)

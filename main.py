@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.distributions as dist
 import torch.optim as optim
 from typing import List
+from numpy import nan
 
 ACTIONS = [
     "x",
@@ -20,12 +21,6 @@ VOCAB = list(string.printable)
 VOCAB_TO_ID = {ch: i for i, ch in enumerate(VOCAB)}
 PAD_ID = len(VOCAB)
 MAX_LEN = 40
-
-# create a headless nvim instance
-# nvim = pynvim.attach('child', argv=["nvim", "--headless", "--embed"])
-
-# attach to an existing socket
-# nvim = pynvim.attach("socket", path="/tmp/nvim.sock")
 
 
 def encode_text(line: str) -> List[int]:
@@ -43,13 +38,14 @@ def encode_mode(mode: str) -> int:
         return 0
     elif mode == "i":
         return 1
-    return 2
+    assert(False)
 
 
 def state_to_tensor(nvim) -> torch.Tensor:
     text_line = nvim.current.buffer[0]  # TODO adapt for :
     line_ids = encode_text(text_line)
     col = nvim.funcs.getpos(".")[2]  # extract 3rd num
+    assert(col != None)
     cursor_encoded = [col / float(MAX_LEN)]  # [2] # extract 3nd int
     mode_id = [encode_mode(nvim.funcs.mode())]
     full_vec = line_ids + cursor_encoded + mode_id
@@ -60,8 +56,12 @@ def step(nvim, action: str, goal: str):
     """
     action is e.g. 'dw', 'x', 'iHello<Esc>', etc.
     """
+    print(f"step() before: {nvim.current.buffer[:]}")
     # 1. Apply action
     nvim.command("normal " + action)
+
+    print(f"action: {action}")
+    print(f"step() after: {nvim.current.buffer[:]}")
 
     # 2. Read new state
     updated_text = list(nvim.current.buffer[:])
@@ -117,6 +117,9 @@ def run_episode(nvim, goal, max_steps=50):
     for t in range(max_steps):
         state_tensor = state_to_tensor(nvim).unsqueeze(0)
         logits = policy_net(state_tensor)
+        # if (logits == torch.Tensor([[nan, nan, nan, nan, nan, nan]])):
+        #     print("yo")
+        print(state_tensor)
         action_dist = dist.Categorical(logits=logits)
 
         action_idx = action_dist.sample()
@@ -132,6 +135,7 @@ def run_episode(nvim, goal, max_steps=50):
     return log_probs, rewards
 
 
+# what does this do
 def compute_returns(rewards, gamma=0.99):
     ans = []
     R = 0
@@ -144,7 +148,7 @@ def compute_returns(rewards, gamma=0.99):
 state_dim = MAX_LEN + 1 + 1
 action_dim = len(ACTIONS)
 policy_net = PolicyNet(state_dim, action_dim)
-optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
+optimizer = optim.Adam(policy_net.parameters(), lr=1e-4)
 gamma = 0.99
 
 torch.set_printoptions(precision=10)
@@ -152,11 +156,11 @@ torch.set_printoptions(precision=10)
 def main():
     start = "abcd"
     goal = "bcd"
-    nvim = pynvim.attach('child', argv=[ "nvim", "--embed", "--headless", "--clean"])
-    nvim.current.buffer[0] = start
 
-    for episode in range(1000):
-        log_probs, rewards = run_episode(nvim, goal)  # you'll need a real env
+    for episode in range(10):
+        nvim = pynvim.attach('child', argv=[ "nvim", "--embed", "--headless", "--clean"])
+        nvim.current.buffer[0] = start
+        log_probs, rewards = run_episode(nvim, goal)
         returns = compute_returns(rewards, gamma)
 
         # Convert returns to a torch tensor
@@ -181,6 +185,7 @@ def main():
         # Possibly print diagnostics
         if episode % 50 == 0:
             print(f"Episode {episode}, total reward: {sum(rewards)}")
+        # nvim.quit()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import Levenshtein
 import pynvim
 import string
 import torch
@@ -7,11 +8,11 @@ import torch.optim as optim
 from typing import List
 
 ACTIONS = [
+    "x",
     "h",
     "j",
     "k",
     "l",
-    "x",
     "i",
 ]
 
@@ -24,7 +25,7 @@ MAX_LEN = 40
 # nvim = pynvim.attach('child', argv=["nvim", "--headless", "--embed"])
 
 # attach to an existing socket
-nvim = pynvim.attach("socket", path="/tmp/nvim.sock")
+# nvim = pynvim.attach("socket", path="/tmp/nvim.sock")
 
 
 def encode_text(line: str) -> List[int]:
@@ -45,7 +46,7 @@ def encode_mode(mode: str) -> int:
     return 2
 
 
-def state_to_tensor() -> torch.Tensor:
+def state_to_tensor(nvim) -> torch.Tensor:
     text_line = nvim.current.buffer[0]  # TODO adapt for :
     line_ids = encode_text(text_line)
     col = nvim.funcs.getpos(".")[2]  # extract 3rd num
@@ -55,7 +56,7 @@ def state_to_tensor() -> torch.Tensor:
     return torch.tensor(full_vec, dtype=torch.float32)
 
 
-def step(action: str):
+def step(nvim, action: str, goal: str):
     """
     action is e.g. 'dw', 'x', 'iHello<Esc>', etc.
     """
@@ -69,18 +70,21 @@ def step(action: str):
 
     # 3. Compute reward
     # For example, negative step penalty and check if we've reached some goal.
-    reward, done = compute_reward(updated_text)
+    reward, done = compute_reward(updated_text, goal)
 
     # 4. Return (reward, done)
     return reward, done
 
 
-def compute_reward(current_text: List[str]):
+def compute_reward(current_text: List[str], goal: str):
     # TODO use diff instead and assign a % score
-    if current_text == ["hjk"]:  # TODO make this work with arbitrary goal
+    ans = 0
+    curr = "\n".join(current_text)
+    dist = Levenshtein.distance(curr, goal)
+    if (dist == 0):
         return (100, True)
     else:
-        return (-1, False)
+        return (-1 * dist, False)
 
 
 class PolicyNet(nn.Module):
@@ -101,28 +105,7 @@ class PolicyNet(nn.Module):
         x = self.fc2(x)
         return x
 
-
-state_dim = MAX_LEN + 1 + 1
-action_dim = len(ACTIONS)
-policy_net = PolicyNet(state_dim, action_dim)
-
-
-# # This chooses a random action?
-# def agent_policy():
-#     state_tensor = state_to_tensor().unsqueeze(0)
-#     logits = policy_net(state_tensor)
-#     action_dist = dist.Categorical(logits=logits)
-#     action_idx = int(action_dist.sample().item())  # take a sample
-#     return ACTIONS[action_idx]
-
-
-torch.set_printoptions(precision=10)
-print(state_to_tensor())
-
-optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
-gamma = 0.99
-
-def run_episode(max_steps=50):
+def run_episode(nvim, goal, max_steps=50):
     """
     Runs one episode in the environment.
     Collect (state, action, reward) pairs until done or max_steps.
@@ -132,14 +115,14 @@ def run_episode(max_steps=50):
     rewards = []
     done = False
     for t in range(max_steps):
-        state_tensor = state_to_tensor().unsqueeze(0)
+        state_tensor = state_to_tensor(nvim).unsqueeze(0)
         logits = policy_net(state_tensor)
         action_dist = dist.Categorical(logits=logits)
 
         action_idx = action_dist.sample()
         action = ACTIONS[int(action_idx.item())]
         log_prob = action_dist.log_prob(action_idx)
-        reward, done = step(action)
+        reward, done = step(nvim, action, goal)
 
         log_probs.append(log_prob)
         rewards.append(reward)
@@ -158,9 +141,22 @@ def compute_returns(rewards, gamma=0.99):
     return ans
 
 
+state_dim = MAX_LEN + 1 + 1
+action_dim = len(ACTIONS)
+policy_net = PolicyNet(state_dim, action_dim)
+optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
+gamma = 0.99
+
+torch.set_printoptions(precision=10)
+
 def main():
+    start = "abcd"
+    goal = "bcd"
+    nvim = pynvim.attach('child', argv=[ "nvim", "--embed", "--headless", "--clean"])
+    nvim.current.buffer[0] = start
+
     for episode in range(1000):
-        log_probs, rewards = run_episode()  # you'll need a real env
+        log_probs, rewards = run_episode(nvim, goal)  # you'll need a real env
         returns = compute_returns(rewards, gamma)
 
         # Convert returns to a torch tensor
@@ -189,13 +185,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# # RL loop, simplified
-# for episode in range(100):
-#     done = False
-#     state = (initial_text, (1,1), 'n')  # rough state
-#     while not done:
-#         # Agent picks an action
-#         action = agent_policy(state)
-#         state, reward, done = step(action)
-#         agent_learn(state, action, reward)
